@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+# The MIT License (MIT)
+#
+# Copyright (c) 2016 Paul Sbarra
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Constants ###################################################################
+
+MAX_LIST_LEN=30
+LIST_LEN=10
+
+# Functions ###################################################################
+
+error() {
+   echo $@ >&2
+   exit 1
+}
+
+is_positive() {
+   [[ "$@" =~ ^[1-9][0-9]*$ ]]
+}
+
+# Arguments ###################################################################
+
+while getopts ":hn:" opt; do
+   case $opt in
+      h)
+         echo "usage: `basename $0` [-h] [-n len] [<commit ref>]"
+         exit
+         ;;
+      n)
+         if ! is_positive $OPTARG; then
+            error "Invalid list length"
+         elif [ $OPTARG -gt $MAX_LIST_LEN ]; then
+            LIST_LEN=$MAX_LIST_LEN
+         else
+            LIST_LEN=$OPTARG
+         fi
+         ;;
+      :)
+         error "Option -$OPTARG requires an argument." >&2
+         ;;
+      #\?)
+      #   echo "Invalid option: -$OPTARG" >&2
+      #   ;;
+   esac
+done
+shift $((OPTIND-1))
+
+REF=$1
+
+# Fixup Content ###############################################################
+
+if `git diff --cached --quiet`; then
+   if `git diff --quiet`; then
+      error "No modifications to fixup"
+   else
+      git add --patch
+      if `git diff --cached --quiet`; then
+         error "No modifications selected"
+      fi
+   fi
+fi
+
+# Stash Required? #############################################################
+
+# Note: This section removed in favor of rebase's autostash option
+#STASH=0
+#if ! `git diff --quiet`; then
+#   if [ -n "`git stash list | grep -o __FIXUP__`" ]; then
+#      error "Please (pop|drop) existing __FIXUP__ stash"
+#   elif `git stash save --keep-index --quiet __FIXUP__`; then
+#      STASH=1
+#   else
+#      error "Unable to stash unstaged changes"
+#   fi
+#fi
+
+# Commit Selection ############################################################
+
+if [ -z "$REF" ]; then
+   PS3="fixup commit: "
+   IFS=$'\n'
+   select I in `git log --pretty=oneline --abbrev-commit --skip=1 -n $LIST_LEN`;
+   do
+      case $I in
+         *)
+            if ! is_positive $REPLY || [ $REPLY -gt $LIST_LEN ]; then
+               echo "warning: invalid selection ($REPLY)"
+               continue
+            fi
+            REF=`echo "$I" | grep -o "^[0-9a-fA-F]\+"`
+            break
+            ;;
+      esac
+   done
+fi
+
+if ! `git rev-parse --verify --quiet $REF > /dev/null`; then
+   error "Invalid reference: $REF"
+fi
+
+# Fixup & Rebase ##############################################################
+
+git commit --fixup $REF
+git rebase -i --autosquash --autostash $REF^
+
