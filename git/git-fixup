@@ -40,13 +40,13 @@ is_positive() {
 
 # Arguments ###################################################################
 
-while getopts ":hn:" opt; do
+while getopts ":hl:n" opt; do
    case $opt in
       h)
-         echo "usage: `basename $0` [-h] [-n len] [<commit ref>]"
+         echo "usage: `basename $0` [-h] [-l len] [-n] [<commit ref>]"
          exit
          ;;
-      n)
+      l)
          if ! is_positive $OPTARG; then
             error "Invalid list length"
          elif [ $OPTARG -gt $MAX_LIST_LEN ]; then
@@ -54,6 +54,9 @@ while getopts ":hn:" opt; do
          else
             LIST_LEN=$OPTARG
          fi
+         ;;
+      n)
+         NO_VERIFY=--no-verify
          ;;
       :)
          error "Option -$OPTARG requires an argument." >&2
@@ -66,6 +69,10 @@ done
 shift $((OPTIND-1))
 
 REF=$1
+
+if ! `git rev-parse --git-dir &> /dev/null`; then
+   error "Must be within a git repository"
+fi
 
 # Fixup Content ###############################################################
 
@@ -114,12 +121,12 @@ if [ -z "$REF" ]; then
    done
 fi
 
-if ! `git rev-parse --verify --quiet $REF > /dev/null`; then
+if ! `git rev-parse --verify --quiet $REF &> /dev/null`; then
    error "Invalid reference: $REF"
 fi
 
 # Fixup & Rebase ##############################################################
 
-git commit --fixup $REF
+git commit $NO_VERIFY --fixup $REF
 git rebase -i --autosquash --autostash $REF^
 
