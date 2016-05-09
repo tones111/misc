@@ -51,52 +51,16 @@ clang-format_diff() {
    clang-format $@
 }
 
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-	against=HEAD
-else
-	# Initial commit: diff against an empty tree object
-	against=4b825dc642cb6eb9a060e54bf8d69288fbee4904
-fi
+clang-tidy_diff() {
+   local diff=$1; shift
 
-fmt_err=0
-while read -r -a tokens; do
-   formatter=
-   obj_hash=${tokens[3]}
-   file=${tokens[5]}
-
-   if [ ! -f $file ]; then
-      continue # skip removed files, submodules
+   if [ $diff -ne 0 ]; then
+      return clang-tidy $@ -- | grep -q warning:
    fi
+   clang-tidy $@ -- &>/dev/null
+}
 
-   ext=${file##*\.}
-   case $ext in
-      c|cc|cp|cpp|cxx|c++|h|hpp)
-         if ! command_exists clang-format; then
-            continue
-         fi
-         formatter=clang-format_diff
-         diff_args="1 $CF_ARGS -assume-filename=$file"
-         mod_args="0 $CF_ARGS -i"
-         ;;
-
-      go)
-         formatter=gofmt
-         diff_args="-d"
-         mod_args="-s -w"
-         ;;
-
-      rs)
-         formatter=rustfmt
-         diff_args="--write-mode diff"
-         mod_args="--write-mode overwrite"
-         ;;
-
-      *)
-         #warn "Unknown file type ($ext): $file"
-         continue
-         ;;
-   esac
-
+format() {
    # Verify the command is available
    if [ -z "$formatter" ] || ! `command_exists $formatter`; then
       continue
@@ -123,5 +87,62 @@ while read -r -a tokens; do
       fi
       rm $index_file
    fi
+}
+
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+	against=HEAD
+else
+	# Initial commit: diff against an empty tree object
+	against=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+fi
+
+fmt_err=0
+while read -r -a tokens; do
+   formatter=
+   obj_hash=${tokens[3]}
+   file=${tokens[5]}
+
+   if [ ! -f $file ]; then
+      continue # skip removed files, submodules
+   fi
+
+   ext=${file##*\.}
+   case $ext in
+      c|cc|cp|cpp|cxx|c++|h|hpp)
+         if ! command_exists clang-format; then
+            continue
+         fi
+         if command_exists clang-tidy; then
+            formatter=clang-tidy_diff
+            diff_args="1"
+            mod_args="0 -fix-errors"
+            format
+            #clang-tidy_diff -fix-errors $file -- 2>/dev/null
+         fi
+         formatter=clang-format_diff
+         diff_args="1 $CF_ARGS -assume-filename=$file"
+         mod_args="0 $CF_ARGS -i"
+         ;;
+
+      go)
+         formatter=gofmt
+         diff_args="-d"
+         mod_args="-s -w"
+         ;;
+
+      rs)
+         formatter=rustfmt
+         diff_args="--write-mode diff"
+         mod_args="--write-mode overwrite"
+         ;;
+
+      *)
+         #warn "Unknown file type ($ext): $file"
+         continue
+         ;;
+   esac
+
+   format
+
 done < <(git diff-index --cached --diff-filter=ACMR $against)
 exit $fmt_err

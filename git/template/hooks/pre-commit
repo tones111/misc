@@ -27,3 +27,9 @@ scripts_dir=$GIT_DIR/hooks/pre-commit_scripts
 set -e
 $scripts_dir/format.sh
 $scripts_dir/lint.sh
+
+if `git diff --quiet --cached`; then
+   echo "No changes to commit"
+   exit 1
+fi
+
